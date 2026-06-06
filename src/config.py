@@ -7,6 +7,8 @@ ANALYSIS_SAVE_PATH = SAVE_PATH / 'analysis'
 RUN_OUTPUTS_PATH = SAVE_PATH / 'runs'
 CONFIG_SNAPS_PATH = SAVE_PATH / 'config_snapshots'
 
+LOG_EVERY = 5
+
 # Move these later
 # CHECKPOINTS_PATH.mkdir(parents=True, exist_ok=True)
 # OUTPUTS_PATH.mkdir(parents=True, exist_ok=True)

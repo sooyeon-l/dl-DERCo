@@ -10,7 +10,6 @@ from pathlib import Path
 from sklearn.model_selection import KFold
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from tqdm.auto import tqdm
 from torch.utils.data import DataLoader
 from src.dataset import EEGDataset
 from src.models.cnn import CNNModel
@@ -242,14 +241,7 @@ def train_model(
     batch_history_all=[]
     best_info = {}
 
-    epoch_pbar = tqdm(
-        range(max_epochs),
-        desc=progress_desc,
-        leave=True,
-        dynamic_ncols=True,
-    )
-
-    for epoch in epoch_pbar: 
+    for epoch in range(max_epochs): 
         avg_train_loss, batch_history = train_one_epoch(
             model=model, 
             train_loader=train_loader, 
@@ -302,31 +294,42 @@ def train_model(
                 checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
                 torch.save({**best_info, **(checkpoint_extra or {})}, checkpoint_path)
-                tqdm.write(f"Saved checkpoint to {checkpoint_path}")
+                print(f"Saved checkpoint to {checkpoint_path}")
 
-            tqdm.write(
+            print(
                 f"New best: epoch {epoch} | "
                 f"ROC AUC={best_val_roc_auc:.4f} | "
                 f"PR AUC={metrics['val_pr_auc']:.4f} | "
                 f"BalAcc={metrics['val_balanced_accuracy']:.4f}"
             )
+            should_log = (
+                epoch == 0
+                or (epoch + 1) % config.LOG_EVERY == 0
+                or epoch == max_epochs - 1
+            )
+
+            if should_log:
+                print(
+                    f"{progress_desc} | "
+                    f"epoch {epoch + 1}/{max_epochs} | "
+                    f"train_loss={avg_train_loss:.4f} | "
+                    f"val_loss={metrics['val_loss']:.4f} | "
+                    f"roc={metrics['val_roc_auc']:.4f} | "
+                    f"pr={metrics['val_pr_auc']:.4f} | "
+                    f"bal={metrics['val_balanced_accuracy']:.4f} | "
+                    f"best={best_val_roc_auc:.4f} | "
+                    f"lr={optimizer.param_groups[0]['lr']:.1e} | "
+                    f"pat={epochs_without_improvement}",
+                    flush=True,
+                )
 
             epochs_without_improvement = 0
         else: 
             epochs_without_improvement += 1
             if epochs_without_improvement >= early_stopping_patience: 
-                tqdm.write("Early stopping triggered.")
+                print("Early stopping triggered.")
                 break
-        epoch_pbar.set_postfix({
-            "train_loss": f"{avg_train_loss:.4f}",
-            "val_loss": f"{metrics['val_loss']:.4f}",
-            "roc": f"{metrics['val_roc_auc']:.4f}" if not np.isnan(metrics["val_roc_auc"]) else "nan",
-            "pr": f"{metrics['val_pr_auc']:.4f}" if not np.isnan(metrics["val_pr_auc"]) else "nan",
-            "bal": f"{metrics['val_balanced_accuracy']:.4f}",
-            "best": f"{best_val_roc_auc:.4f}",
-            "lr": f"{optimizer.param_groups[0]['lr']:.1e}",
-            "pat": epochs_without_improvement,
-        })
+        
         
     return epoch_history, batch_history_all, best_info
 
@@ -373,7 +376,7 @@ def run_experiment(
 
     if run_name is None:
         label_mode = "shuffle" if shuffle_labels else "main"
-        run_name = f"{model_name}_{sfreq}hz_{window}_{label_mode}"
+        run_name = f"{model_name}_{window}_{sfreq}hz"
 
     if checkpoint_dir is None:
         checkpoint_dir = config.CHECKPOINTS_PATH / run_name
