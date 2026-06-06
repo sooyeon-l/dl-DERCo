@@ -1,0 +1,52 @@
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.ini
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Data and model files
+*.npy
+*.pt
+*.fif
+*.csv
+*.tsv
+*.pth
+*.ckpt
+
+# Local folders — keep structure, ignore contents
+checkpoints/*
+!checkpoints/.gitkeep
+outputs/*
+!outputs/.gitkeep
+data/*
+!data/.gitkeep
+inputs/*
+!inputs/.gitkeep
+analysis/*
+!analysis/.gitkeep
+config_snapshots/*
+!config_snapshots/.gitkeep
+training_logs/*
+!training_logs/.gitkeep
+processed_data_250hz/*
+!processed_data_250hz/.gitkeep
+processed_data_1000hz/*
+!processed_data_1000hz/.gitkeep
+training_logs/*
+!training_logs/.gitkeep
+outputs/runs/*
+!outputs/runs/.gitkeep
+
+# Include later
+notebooks/*
+!notebooks/.gitkeep
