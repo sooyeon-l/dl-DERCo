@@ -418,6 +418,25 @@ def run_experiment(
     if model_name == "cnn" and window not in config.CNN_WINDOWS:
         raise ValueError(f"CNN window must be one of {config.CNN_WINDOWS}, got {window}")
     
+    data_dir = train_val_path / f"{sfreq}hz"
+    x_path = data_dir / f"X_{window}.npy"
+    y_path = data_dir / "y.npy"
+    subjects_path = data_dir / "subjects.npy"
+
+    X_train_val = np.load(x_path)
+    y_train_val = np.load(y_path)
+    subjects_train_val = np.load(subjects_path)
+
+    expected_timepoints = config.WINDOWS[sfreq][window].stop - config.WINDOWS[sfreq][window].start
+    actual_timepoints = X_train_val.shape[-1]
+
+    if actual_timepoints != expected_timepoints:
+        raise ValueError(
+            f"Sampling-rate/window mismatch: sfreq={sfreq}, window={window} expects "
+            f"{expected_timepoints} timepoints, but loaded X has {actual_timepoints}. "
+            f"Loaded X from: {x_path}"
+        )
+
     seed = config.RANDOM_SEED
     n_folds = config.N_FOLDS
 
@@ -445,10 +464,6 @@ def run_experiment(
     batch_history_all = []
     class_balance_records = []
     best_summary_records = []
-
-    X_train_val = np.load(train_val_path / f'{sfreq}hz/X_{window}.npy')
-    y_train_val = np.load(train_val_path / f'{sfreq}hz/y.npy')
-    subjects_train_val = np.load(train_val_path / f'{sfreq}hz/subjects.npy')
 
     all_unique_subjects = np.unique(subjects_train_val)
 

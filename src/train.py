@@ -20,21 +20,10 @@ def set_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 def get_run_dirs(args):
-    """
-    Decide where outputs and checkpoints should be saved.
-
-    Baseline:
-        outputs/runs/baseline/<run_name>/
-        checkpoints/baseline/<run_name>/
-
-    Subject ablation:
-        outputs/runs/subject_ablation/<model>/nsubjXX/seedYYY/
-        checkpoints/subject_ablation/<model>/nsubjXX/seedYYY/
-    """
     if args.n_subjects is None:
-        output_dir = config.RUN_OUTPUTS_PATH / "baseline" / args.run
-        checkpoint_dir = config.CHECKPOINTS_PATH / "baseline"
         run_name = args.run
+        output_dir = config.RUN_OUTPUTS_PATH / "baseline" / run_name
+        checkpoint_dir = config.CHECKPOINTS_PATH / "baseline" / run_name
         return run_name, output_dir, checkpoint_dir
 
     if args.ablation_seed is None:
