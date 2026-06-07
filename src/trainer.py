@@ -29,6 +29,11 @@ def make_config_snapshot(
     y_train_val,
     subjects_train_val,
     unique_subjects,
+    all_unique_subjects=None,
+    selected_subjects=None,
+    n_subjects=None,
+    ablation_seed=None,
+    n_folds=None,
 ):
     snapshot = {
         # Run identity
@@ -44,8 +49,13 @@ def make_config_snapshot(
         "X_train_val_shape": str(tuple(X_train_val.shape)),
         "y_train_val_shape": str(tuple(y_train_val.shape)),
         "subjects_train_val_shape": str(tuple(subjects_train_val.shape)),
+        "n_subjects_requested": None if n_subjects is None else int(n_subjects),
+        "ablation_seed": None if ablation_seed is None else int(ablation_seed),
+        "n_all_unique_subjects": (None if all_unique_subjects is None else int(len(all_unique_subjects))),
+        "n_selected_subjects": None if selected_subjects is None else int(len(selected_subjects)),
+        "selected_subjects": None if selected_subjects is None else [str(s) for s in selected_subjects],
         "n_unique_subjects": int(len(unique_subjects)),
-        "n_folds": config.N_FOLDS,
+        "n_folds": int(n_folds) if n_folds is not None else config.N_FOLDS,
 
         # Training hyperparameters
         "random_seed": config.RANDOM_SEED,
@@ -238,7 +248,7 @@ def train_model(
     criterion = nn.BCEWithLogitsLoss()
 
     epoch_history = []
-    batch_history_all=[]
+    batch_history_all = []
     best_info = {}
 
     for epoch in range(max_epochs): 
@@ -356,6 +366,39 @@ def build_model(model_name:str, sfreq:int):
     
     raise ValueError(f"Unknown model_name: {model_name}")
 
+def select_subject_subset(unique_subjects, n_subjects=None, ablation_seed=None):
+    unique_subjects = np.asarray(unique_subjects)
+
+    if n_subjects is None:
+        return unique_subjects
+
+    if n_subjects < 2:
+        raise ValueError(
+            f"n_subjects must be at least 2 for subject-disjoint CV, got {n_subjects}."
+        )
+
+    if n_subjects > len(unique_subjects):
+        raise ValueError(
+            f"Requested n_subjects={n_subjects}, but only "
+            f"{len(unique_subjects)} unique subjects are available."
+        )
+
+    if ablation_seed is None:
+        raise ValueError(
+            "ablation_seed must be provided when n_subjects is used, "
+            "so subject subset selection is explicit and reproducible."
+        )
+
+    rng = np.random.default_rng(ablation_seed)
+
+    selected_subjects = rng.choice(
+        unique_subjects,
+        size=n_subjects,
+        replace=False,
+    )
+
+    return np.sort(selected_subjects)
+
 def run_experiment(
         model_name:str, 
         window:str, 
@@ -367,21 +410,29 @@ def run_experiment(
         run_name:str=None, 
         checkpoint_dir:Path=None,
         output_dir:Path=None,
+        n_subjects:int=None,
+        ablation_seed:int=None,
 ): 
     if model_name == "eegnet" and window not in config.EEGNET_WINDOWS:
         raise ValueError(f"EEGNet is only configured for {config.EEGNET_WINDOWS}, got {window}")
     if model_name == "cnn" and window not in config.CNN_WINDOWS:
         raise ValueError(f"CNN window must be one of {config.CNN_WINDOWS}, got {window}")
+    
     seed = config.RANDOM_SEED
+    n_folds = config.N_FOLDS
 
     if run_name is None:
         label_mode = "shuffle" if shuffle_labels else "main"
-        run_name = f"{model_name}_{window}_{sfreq}hz"
 
+        if n_subjects is None:
+            run_name = f"{model_name}_{window}_{sfreq}hz_{label_mode}"
+        else:
+            run_name = (
+                f"{model_name}_{window}_{sfreq}hz_{label_mode}_"
+                f"nsubj{n_subjects:02d}_seed{ablation_seed:03d}"
+            )
     if checkpoint_dir is None:
         checkpoint_dir = config.CHECKPOINTS_PATH / run_name
-    else:
-        checkpoint_dir = checkpoint_dir / run_name
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -399,7 +450,30 @@ def run_experiment(
     y_train_val = np.load(train_val_path / 'y.npy')
     subjects_train_val = np.load(train_val_path / 'subjects.npy')
 
+    all_unique_subjects = np.unique(subjects_train_val)
+
+    selected_subjects = select_subject_subset(
+        unique_subjects=all_unique_subjects, 
+        n_subjects=n_subjects, 
+        ablation_seed=ablation_seed,
+    )
+
+    subject_pool_mask = np.isin(subjects_train_val, selected_subjects)
+
+    X_train_val = X_train_val[subject_pool_mask]
+    y_train_val = y_train_val[subject_pool_mask]
+    subjects_train_val = subjects_train_val[subject_pool_mask]
+
     unique_subjects = np.unique(subjects_train_val)
+
+    n_folds = min(config.N_FOLDS, len(unique_subjects))
+
+    if n_folds < 2: 
+        raise ValueError(
+            f"Need at least 2 subjects for subject-disjoint CV, got {len(unique_subjects)}."
+        )
+
+
     config_snapshot = make_config_snapshot(
         run_name=run_name,
         model_name=model_name,
@@ -412,7 +486,12 @@ def run_experiment(
         X_train_val=X_train_val,
         y_train_val=y_train_val,
         subjects_train_val=subjects_train_val,
+        all_unique_subjects=all_unique_subjects,
         unique_subjects=unique_subjects,
+        selected_subjects=selected_subjects,
+        n_subjects=n_subjects, 
+        ablation_seed=ablation_seed,
+        n_folds=n_folds,
     )
 
     if output_dir is not None:
@@ -426,19 +505,22 @@ def run_experiment(
     print("\n" + "=" * 80, flush=True)
     print(
         f"[Run] model={model_name} | window={window} | sfreq={sfreq}Hz | "
-        f"shuffle_labels={shuffle_labels}",
+        f"shuffle_labels={shuffle_labels} | n_subjects={n_subjects} | "
+        f"ablation_seed={ablation_seed}",
         flush=True,
     )
     print(
         f"Loaded train/val data: X={X_train_val.shape}, "
         f"y={y_train_val.shape}, subjects={subjects_train_val.shape}, "
-        f"unique_subjects={len(unique_subjects)}",
+        f"selected_subjects={len(unique_subjects)}/{len(all_unique_subjects)} | "
+        f"n_folds={n_folds}",
         flush=True,
     )
+    print(f"Selected subjects: {selected_subjects}", flush=True)
     print("=" * 80, flush=True)
 
     kf = KFold(
-        n_splits=config.N_FOLDS, 
+        n_splits=n_folds, 
         shuffle=True, 
         random_state=seed
     )
@@ -457,7 +539,7 @@ def run_experiment(
         y_val = y_train_val[val_mask]
 
         print(
-            f"\nStarting fold {fold_idx + 1}/{config.N_FOLDS} | "
+            f"\nStarting fold {fold_idx + 1}/{n_folds} | "
             f"model={model_name} | window={window} | sfreq={sfreq}Hz | "
             f"train_n={len(y_train)} | val_n={len(y_val)} | "
             f"train_high={(y_train == 1).mean():.3f} | "
@@ -542,6 +624,9 @@ def run_experiment(
             "zscore_std": std.astype(np.float32),
             "train_subjects": train_subjs,
             "val_subjects": val_subjs,
+            "n_subjects_requested": n_subjects,
+            "ablation_seed": ablation_seed,
+            "selected_subjects": selected_subjects,
         }
 
         epoch_history, batch_history_per_epoch, epoch_best_info = train_model(
@@ -555,7 +640,7 @@ def run_experiment(
             device=device,
             grad_clip=config.GRAD_CLIP, 
             threshold=config.THRESHOLD, 
-            progress_desc=f"Fold {fold_idx + 1}/{config.N_FOLDS}",
+            progress_desc=f"Fold {fold_idx + 1}/{n_folds}",
             checkpoint_path=fold_checkpoint_path,
             checkpoint_extra=checkpoint_extra,
         )
@@ -565,7 +650,7 @@ def run_experiment(
                 "Check whether the validation fold contains both classes."
             )
         print(
-            f"[Fold {fold_idx + 1}/{config.N_FOLDS} done] "
+            f"[Fold {fold_idx + 1}/{n_folds} done] "
             f"best_epoch={epoch_best_info['epoch']} | "
             f"best_val_roc_auc={epoch_best_info['best_val_roc_auc']:.4f} | "
             f"best_val_pr_auc={epoch_best_info['best_val_pr_auc']:.4f} | "
@@ -579,6 +664,9 @@ def run_experiment(
             row["sfreq"] = sfreq
             row["model"] = model_name
             row["shuffle_labels"] = shuffle_labels
+            row["n_subjects_requested"] = n_subjects
+            row["ablation_seed"] = ablation_seed
+            row["n_selected_subjects"] = len(selected_subjects)
 
         for row in batch_history_per_epoch:
             row["run_name"] = run_name
@@ -587,6 +675,9 @@ def run_experiment(
             row["sfreq"] = sfreq
             row["model"] = model_name
             row["shuffle_labels"] = shuffle_labels
+            row["n_subjects_requested"] = n_subjects
+            row["ablation_seed"] = ablation_seed
+            row["n_selected_subjects"] = len(selected_subjects)
 
         epoch_best_info["zscore_mean"] = mean.astype(np.float32)
         epoch_best_info["zscore_std"] = std.astype(np.float32)
@@ -610,6 +701,9 @@ def run_experiment(
             "threshold": config.THRESHOLD,
             "n_train_subjects": len(train_subjs),
             "n_val_subjects": len(val_subjs),
+            "n_subjects_requested": n_subjects,
+            "ablation_seed": ablation_seed,
+            "n_selected_subjects": len(selected_subjects),
             "window": window,
             "sfreq": sfreq,
             "model": model_name,
@@ -630,7 +724,8 @@ def run_experiment(
     print("[Cross-validation complete]", flush=True)
     print(
         f"model={model_name} | window={window} | sfreq={sfreq}Hz | "
-        f"shuffle_labels={shuffle_labels}",
+        f"shuffle_labels={shuffle_labels} | n_subjects={n_subjects} | "
+        f"ablation_seed={ablation_seed}",
         flush=True,
     )
     print(f"Global validation-derived threshold: {global_threshold:.4f}", flush=True)
@@ -647,6 +742,11 @@ def run_experiment(
         "window": window,
         "sfreq": int(sfreq),
         "shuffle_labels": bool(shuffle_labels),
+        "n_subjects_requested": None if n_subjects is None else int(n_subjects),
+        "ablation_seed": None if ablation_seed is None else int(ablation_seed),
+        "n_selected_subjects": int(len(selected_subjects)),
+        "selected_subjects": [str(s) for s in selected_subjects],
+        "n_folds": int(n_folds),
         "global_threshold": float(global_threshold),
         "cv_balanced_accuracy_at_global_threshold": float(bal_acc_at_global_threshold),
     }

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-SAVE_PATH = Path('/workspace/data')
+SAVE_PATH = Path('/workspace/data/DERCo')
 INPUT_PATH = SAVE_PATH / 'inputs'
 CHECKPOINTS_PATH = SAVE_PATH / 'checkpoints'
 ANALYSIS_SAVE_PATH = SAVE_PATH / 'analysis'
