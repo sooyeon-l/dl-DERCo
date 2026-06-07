@@ -446,9 +446,9 @@ def run_experiment(
     class_balance_records = []
     best_summary_records = []
 
-    X_train_val = np.load(train_val_path / f'X_{window}.npy')
-    y_train_val = np.load(train_val_path / 'y.npy')
-    subjects_train_val = np.load(train_val_path / 'subjects.npy')
+    X_train_val = np.load(train_val_path / f'{sfreq}hz/X_{window}.npy')
+    y_train_val = np.load(train_val_path / f'{sfreq}hz/y.npy')
+    subjects_train_val = np.load(train_val_path / f'{sfreq}hz/subjects.npy')
 
     all_unique_subjects = np.unique(subjects_train_val)
 
