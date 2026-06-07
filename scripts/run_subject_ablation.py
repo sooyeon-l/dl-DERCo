@@ -30,7 +30,7 @@ def run_is_complete(model: str, n_subjects: int, seed: int) -> bool:
 def launch_run(model: str, n_subjects: int, seed: int):
     run_name = make_run_name(model, n_subjects, seed)
 
-    if run_is_complete(run_name):
+    if run_is_complete(run_name, n_subjects, seed):
         print(f"[SKIP] {run_name} already complete.", flush=True)
         return
 
