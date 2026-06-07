@@ -56,7 +56,7 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--run", type=str, required=True)
-    parser.add_argument("--model", choices=["cnn", "eegnet"], required=True)
+    parser.add_argument("--model", choices=["cnn", "cnn_v2", "eegnet"], required=True)
     parser.add_argument("--sfreq", type=int, choices=[250, 1000], default=250)
     parser.add_argument("--window", type=str, required=True)
     parser.add_argument("--shuffle_labels", action="store_true")

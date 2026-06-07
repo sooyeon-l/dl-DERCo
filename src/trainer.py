@@ -12,7 +12,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from src.dataset import EEGDataset
-from src.models.cnn import CNNModel
+from src.models.cnn import CNNModel, CNNV2Model
 from src.models.eegnet import EEGNetModel
 from src.eval import find_best_threshold_bal_acc
 
@@ -343,10 +343,18 @@ def train_model(
         
     return epoch_history, batch_history_all, best_info
 
-def build_model(model_name:str, sfreq:int):
+def build_model(model_name: str, sfreq: int):
     if model_name == "cnn":
         cnn_cfg = config.CNN_CONFIGS[sfreq]
         return CNNModel(
+            dropout_p=config.DROPOUT_P,
+            kernel_len=cnn_cfg["kernel_len"],
+            num_channels=config.NUM_CHANNELS,
+        )
+
+    if model_name == "cnn_v2":
+        cnn_cfg = config.CNN_CONFIGS[sfreq]
+        return CNNV2Model(
             dropout_p=config.DROPOUT_P,
             kernel_len=cnn_cfg["kernel_len"],
             num_channels=config.NUM_CHANNELS,
@@ -363,7 +371,7 @@ def build_model(model_name:str, sfreq:int):
             F1=eeg_cfg["F1"],
             D=eeg_cfg["D"],
         )
-    
+
     raise ValueError(f"Unknown model_name: {model_name}")
 
 def select_subject_subset(unique_subjects, n_subjects=None, ablation_seed=None):
@@ -415,7 +423,8 @@ def run_experiment(
 ): 
     if model_name == "eegnet" and window not in config.EEGNET_WINDOWS:
         raise ValueError(f"EEGNet is only configured for {config.EEGNET_WINDOWS}, got {window}")
-    if model_name == "cnn" and window not in config.CNN_WINDOWS:
+
+    if model_name in ["cnn", "cnn_v2"] and window not in config.CNN_WINDOWS:
         raise ValueError(f"CNN window must be one of {config.CNN_WINDOWS}, got {window}")
     
     data_dir = train_val_path / f"{sfreq}hz"
