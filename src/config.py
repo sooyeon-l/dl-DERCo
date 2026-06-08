@@ -51,6 +51,7 @@ CNN_CONFIGS = {
     250: {
         "kernel_len": 31,
         "padding": 15,
+        "sep_kernel_len": 15, 
     },
 }
 

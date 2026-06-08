@@ -343,11 +343,12 @@ def train_model(
         
     return epoch_history, batch_history_all, best_info
 
-def build_model(model_name: str, sfreq: int):
+def build_model(model_name: str, sfreq: int, num_timepoints: int):
     if model_name == "cnn":
         cnn_cfg = config.CNN_CONFIGS[sfreq]
         return CNNModel(
             dropout_p=config.DROPOUT_P,
+            num_timepoints=num_timepoints,
             kernel_len=cnn_cfg["kernel_len"],
             num_channels=config.NUM_CHANNELS,
         )
@@ -356,7 +357,9 @@ def build_model(model_name: str, sfreq: int):
         cnn_cfg = config.CNN_CONFIGS[sfreq]
         return CNNV2Model(
             dropout_p=config.DROPOUT_P,
+            num_timepoints=num_timepoints,
             kernel_len=cnn_cfg["kernel_len"],
+            sep_kernel_len=cnn_cfg["sep_kernel_len"],
             num_channels=config.NUM_CHANNELS,
         )
 
@@ -621,7 +624,7 @@ def run_experiment(
             num_workers=0
         )
 
-        model = build_model(model_name=model_name, sfreq=sfreq).to(device)
+        model = build_model(model_name=model_name, sfreq=sfreq, num_timepoints=actual_timepoints).to(device)
 
         optimizer = AdamW(
             model.parameters(),

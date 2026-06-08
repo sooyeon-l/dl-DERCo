@@ -63,7 +63,7 @@ class EEGNetModel(nn.Module):
             nn.Conv2d(F2, F2, kernel_size=(1, 1), bias=False), 
             nn.BatchNorm2d(F2), 
             nn.ELU(), 
-            nn.AvgPool2d(kernel_size=(1, 8)), 
+            nn.AvgPool2d(kernel_size=(1, 8)), # shape -> (batch, 16, 1, ~6)
             nn.Dropout(dropout_p),
 
         )
