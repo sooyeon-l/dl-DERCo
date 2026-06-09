@@ -470,6 +470,7 @@ def run_experiment(
     # out-of-fold probabilties and labels
     oof_probs_all = []
     oof_labels_all = []
+    oof_subjects_all = []
     
     # other records
     epoch_history_all = []
@@ -715,6 +716,7 @@ def run_experiment(
         epoch_history_all.append(epoch_history)
         batch_history_all.append(batch_history_per_epoch)
 
+        oof_subjects_all.append(subjects_train_val[val_mask])
         oof_probs_all.append(epoch_best_info['best_val_probabilities'])
         oof_labels_all.append(epoch_best_info['best_val_labels'])
         best_summary_records.append({
@@ -742,6 +744,7 @@ def run_experiment(
     batch_log = [row for fold_hist in batch_history_all for row in fold_hist]
     oof_probs = np.concatenate(oof_probs_all)
     oof_labels = np.concatenate(oof_labels_all)
+    oof_subjects = np.concatenate(oof_subjects_all)
 
     global_threshold, bal_acc_at_global_threshold = find_best_threshold_bal_acc(
         y_true=oof_labels, 
@@ -787,5 +790,6 @@ def run_experiment(
         "class_balance": class_balance_records,
         "oof_probs": oof_probs,
         "oof_labels": oof_labels,
+        "oof_subjects": oof_subjects,
     }
     

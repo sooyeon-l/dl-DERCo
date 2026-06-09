@@ -5,7 +5,6 @@ import json
 import os
 from typing import Optional
 
-import mne as _mne
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -26,6 +25,33 @@ MODEL_LABELS = {
 MODEL_ORDER = ["cnn", "cnn_v2", "eegnet"]
 
 
+def infer_derco_root() -> Path:
+    """Infer the DERCo project/data root across RunPod and Colab."""
+    candidates = [
+        os.environ.get("DERCO_ROOT"),
+        "/workspace/data/DERCo",
+        "/content/drive/MyDrive/Colab_Notebooks/DERCo",
+    ]
+
+    for candidate in candidates:
+        if candidate is None:
+            continue
+
+        root = Path(candidate)
+        if root.exists():
+            return root
+
+    # Fallback keeps the old Colab path, but users can override with set_derco_root().
+    return Path("/content/drive/MyDrive/Colab_Notebooks/DERCo")
+
+
+DERCO_ROOT = infer_derco_root()
+RUNS_ROOT = DERCO_ROOT / "outputs" / "runs"
+ANALYSIS_ROOT = DERCO_ROOT / "analysis"
+TABLES_DIR = ANALYSIS_ROOT / "tables"
+FIGURES_DIR = ANALYSIS_ROOT / "figures"
+
+
 def set_derco_root(root: str | Path) -> Path:
     """
     Update module-level paths after import.
@@ -38,7 +64,7 @@ def set_derco_root(root: str | Path) -> Path:
 
     DERCO_ROOT = Path(root)
     RUNS_ROOT = DERCO_ROOT / "outputs" / "runs"
-    ANALYSIS_ROOT = RUNS_ROOT / "analysis"
+    ANALYSIS_ROOT = DERCO_ROOT / "analysis"
     TABLES_DIR = ANALYSIS_ROOT / "tables"
     FIGURES_DIR = ANALYSIS_ROOT / "figures"
 
@@ -1365,6 +1391,8 @@ def plot_oof_probability_distributions(
 
     return fig, axes
 
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 12. Gradient saliency maps
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1380,28 +1408,22 @@ DERCO_CHANNEL_NAMES = [
 ]
 
 
-def _load_fold_checkpoint(ckpt_path, device):
+def _load_fold_checkpoint(ckpt_path: Path, device: str = "cpu") -> tuple[dict, dict]:
+    """Load a fold checkpoint. Returns (state_dict, extras)."""
     import torch
 
-    # These are our own training checkpoints and include metadata such as
-    # zscore_mean, zscore_std, train_subjects, and val_subjects.
-    # PyTorch 2.6 defaults torch.load(..., weights_only=True), which blocks
-    # NumPy metadata. We explicitly set weights_only=False for trusted local
-    # checkpoints.
-    ckpt = torch.load(
-        ckpt_path,
-        map_location=device,
-        weights_only=False,
-    )
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
 
     if not isinstance(ckpt, dict):
-        raise ValueError(f"Expected checkpoint dict, got {type(ckpt)} from {ckpt_path}")
+        return ckpt, {}
 
-    if "model_state_dict" in ckpt:
-        state_dict = ckpt["model_state_dict"]
-        extras = {k: v for k, v in ckpt.items() if k != "model_state_dict"}
-        return state_dict, extras
+    for key in ("model_state_dict", "state_dict", "model"):
+        if key in ckpt:
+            state_dict = ckpt[key]
+            extras = {k: v for k, v in ckpt.items() if k != key}
+            return state_dict, extras
 
+    # Checkpoint IS the state dict
     return ckpt, {}
 
 
@@ -1605,7 +1627,7 @@ def plot_saliency_single(
 
     # ── Topomap ───────────────────────────────────────────────────────────────
     if mne_info is not None:
-        # import mne as _mne
+        import mne as _mne
 
         ax_topo = axes[1]
         t_idx = _saliency_time_index(peak_ms, T, window_ms)
@@ -1673,7 +1695,7 @@ def plot_saliency_comparison(
     vmax = max(m.max() for m in maps)
 
     if mne_info is not None:
-        # import mne as _mne
+        import mne as _mne
         fig, axes = plt.subplots(2, 2, figsize=(13, 9))
         heat_axes = axes[0]
         topo_axes = axes[1]
@@ -1736,339 +1758,3 @@ def plot_saliency_comparison(
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
 
     return fig, axes
-
-
-# =============================================================================
-# baseline helper lookup, training curves,
-# probability histograms, paired fold t-tests, paired bootstrap, and table saving
-# =============================================================================
-
-import warnings
-from scipy.stats import ttest_rel
-
-def _model_display_name(model: str) -> str:
-    mapping = {
-        "cnn": "CNN-v1",
-        "cnn_v2": "CNN-v2",
-        "eegnet": "EEGNet",
-    }
-    return mapping.get(str(model), str(model))
-
-def find_run_dir(run_name: str, runs_root: Path = RUNS_ROOT) -> Path:
-    """Find a completed run folder by run_summary.json run_name."""
-    matches = []
-    for summary_path in runs_root.rglob("run_summary.json"):
-        run_dir = summary_path.parent
-        try:
-            summary = load_json(summary_path)
-        except Exception:
-            continue
-        if summary.get("run_name") == run_name:
-            matches.append(run_dir)
-
-    if len(matches) == 0:
-        raise FileNotFoundError(f"No run found with run_name={run_name} under {runs_root}")
-
-    if len(matches) > 1:
-        warnings.warn(
-            f"Multiple matches found for {run_name}; using first match:\n"
-            + "\n".join(str(m) for m in matches)
-        )
-
-    return matches[0]
-
-def load_oof_run(run_name: str, runs_root: Path = RUNS_ROOT) -> dict:
-    run_dir = find_run_dir(run_name, runs_root=runs_root)
-    summary = load_json(run_dir / "run_summary.json")
-
-    config = {}
-    config_path = run_dir / "config_snapshot.json"
-    if config_path.exists():
-        config = load_json(config_path)
-
-    oof_path = run_dir / "oof_predictions.npz"
-    if not oof_path.exists():
-        raise FileNotFoundError(f"Missing oof_predictions.npz for {run_name}: {oof_path}")
-
-    oof = np.load(oof_path)
-
-    return {
-        "run_name": run_name,
-        "run_dir": run_dir,
-        "summary": summary,
-        "config": config,
-        "y_true": oof["oof_labels"].reshape(-1),
-        "y_prob": oof["oof_probs"].reshape(-1),
-    }
-
-def summarize_run(run_name: str, runs_root: Path = RUNS_ROOT) -> dict:
-    run = load_oof_run(run_name, runs_root=runs_root)
-    threshold = _safe_float(run["summary"].get("global_threshold", 0.5), default=0.5)
-    metrics = compute_metrics(run["y_true"], run["y_prob"], threshold)
-
-    return {
-        "run_name": run_name,
-        "model": run["summary"].get("model"),
-        "model_display": _model_display_name(run["summary"].get("model")),
-        "window": run["summary"].get("window"),
-        "sfreq": run["summary"].get("sfreq"),
-        "shuffle_labels": run["summary"].get("shuffle_labels"),
-        "run_dir": str(run["run_dir"]),
-        **metrics,
-    }
-
-def compute_metrics(y_true, y_prob, threshold: float) -> dict:
-    y_pred = (y_prob >= threshold).astype(int)
-    return {
-        "oof_auc": roc_auc_score(y_true, y_prob),
-        "oof_accuracy": accuracy_score(y_true, y_pred),
-        "oof_balanced_accuracy": balanced_accuracy_score(y_true, y_pred),
-        "oof_f1": f1_score(y_true, y_pred),
-        "threshold": threshold,
-        "n_samples": len(y_true),
-    }
-
-def load_epoch_log(run_name: str, runs_root: Path = RUNS_ROOT) -> pd.DataFrame:
-    run_dir = find_run_dir(run_name, runs_root=runs_root)
-    path = run_dir / "epoch_log.csv"
-    if not path.exists():
-        raise FileNotFoundError(f"Missing epoch_log.csv for {run_name}: {path}")
-    return pd.read_csv(path)
-
-def plot_training_curves(
-    epoch_log: pd.DataFrame,
-    run_name: str,
-    save_path: Path | None = None,
-):
-    folds = sorted(epoch_log["fold"].dropna().unique())
-    n_folds = len(folds)
-    if n_folds == 0:
-        raise ValueError(f"No folds found in epoch_log for {run_name}")
-
-    fig, axes = plt.subplots(1, n_folds, figsize=(4 * n_folds, 4), sharey=False)
-    if n_folds == 1:
-        axes = [axes]
-
-    fig.suptitle(f"Training curves — {run_name}", fontsize=13)
-
-    for ax, fold in zip(axes, folds):
-        fold_log = epoch_log[epoch_log["fold"] == fold].copy()
-        ax.plot(fold_log["epoch"], fold_log["avg_train_loss"], label="Train loss")
-        ax.plot(fold_log["epoch"], fold_log["val_loss"], label="Val loss")
-
-        ax2 = ax.twinx()
-        ax2.plot(fold_log["epoch"], fold_log["val_roc_auc"], label="Val AUC", linestyle="--", alpha=0.7)
-        ax2.set_ylim(0.4, 0.8)
-        ax2.set_ylabel("Val AUC", fontsize=9)
-
-        if fold_log["val_roc_auc"].notna().any():
-            best_idx = fold_log["val_roc_auc"].idxmax()
-            best_epoch = fold_log.loc[best_idx, "epoch"]
-            ax.axvline(best_epoch, linestyle=":", linewidth=0.8, label=f"Best epoch {best_epoch}")
-
-        ax.set_title(f"Fold {int(fold) + 1}")
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Loss")
-        ax.legend(fontsize=7, loc="upper right")
-
-    fig.tight_layout()
-    if save_path is not None:
-        ensure_analysis_dirs()
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    return fig, axes
-
-def plot_training_curves_for_runs(run_names: list[str], runs_root: Path = RUNS_ROOT, save: bool = True):
-    figs = {}
-    for run_name in run_names:
-        try:
-            log = load_epoch_log(run_name, runs_root=runs_root)
-            save_path = FIGURES_DIR / f"{run_name}_training_curves.png" if save else None
-            fig, axes = plot_training_curves(log, run_name, save_path=save_path)
-            figs[run_name] = fig
-        except FileNotFoundError as e:
-            warnings.warn(str(e))
-    return figs
-
-def plot_prob_dist_on_axis(y_prob, y_true, label: str, ax, bins: int = 40):
-    y_prob = np.asarray(y_prob).reshape(-1)
-    y_true = np.asarray(y_true).reshape(-1)
-
-    ax.hist(y_prob[y_true == 0], bins=bins, alpha=0.6, label="Low cloze (0)", density=True)
-    ax.hist(y_prob[y_true == 1], bins=bins, alpha=0.6, label="High cloze (1)", density=True)
-    ax.axvline(0.5, linestyle="--", linewidth=0.8)
-    ax.set_title(label)
-    ax.set_xlabel("Predicted probability")
-    ax.set_ylabel("Density")
-    ax.set_xlim(0, 1)
-    ax.legend(fontsize=8)
-
-def plot_probability_distributions(
-    run_names: list[str],
-    labels: list[str] | None = None,
-    title: str = "OOF predicted probability distributions",
-    save_path: Path | None = None,
-    bins: int = 40,
-    runs_root: Path = RUNS_ROOT,
-):
-    if labels is None:
-        labels = run_names
-    if len(labels) != len(run_names):
-        raise ValueError("labels must have same length as run_names")
-
-    n = len(run_names)
-    fig, axes = plt.subplots(1, n, figsize=(5 * n, 4), sharex=True, sharey=False)
-    if n == 1:
-        axes = [axes]
-
-    for ax, run_name, label in zip(axes, run_names, labels):
-        run = load_oof_run(run_name, runs_root=runs_root)
-        plot_prob_dist_on_axis(run["y_prob"], run["y_true"], label, ax, bins=bins)
-
-    fig.suptitle(title, fontsize=13)
-    fig.tight_layout()
-
-    if save_path is not None:
-        ensure_analysis_dirs()
-        fig.savefig(save_path, dpi=300, bbox_inches="tight")
-    return fig, axes
-
-def load_fold_aucs(run_name: str, runs_root: Path = RUNS_ROOT) -> np.ndarray:
-    run_dir = find_run_dir(run_name, runs_root=runs_root)
-    path = run_dir / "best_summary.csv"
-    if not path.exists():
-        raise FileNotFoundError(f"Missing best_summary.csv for {run_name}: {path}")
-    df = pd.read_csv(path)
-    return df.sort_values("fold")["best_val_roc_auc"].values
-
-def paired_fold_ttest_auc(run_a_name: str, run_b_name: str, runs_root: Path = RUNS_ROOT) -> dict:
-    auc_a = load_fold_aucs(run_a_name, runs_root=runs_root)
-    auc_b = load_fold_aucs(run_b_name, runs_root=runs_root)
-
-    if len(auc_a) != len(auc_b):
-        raise ValueError(f"Fold counts differ: {run_a_name} has {len(auc_a)}, {run_b_name} has {len(auc_b)}")
-
-    t, p = ttest_rel(auc_a, auc_b)
-    diff = auc_a - auc_b
-
-    return {
-        "run_a": run_a_name,
-        "run_b": run_b_name,
-        "n_folds": len(auc_a),
-        "mean_auc_a": float(np.mean(auc_a)),
-        "mean_auc_b": float(np.mean(auc_b)),
-        "mean_diff_a_minus_b": float(np.mean(diff)),
-        "t": float(t),
-        "p": float(p),
-        "df": int(len(auc_a) - 1),
-        "a_wins_every_fold": bool(np.all(auc_a > auc_b)),
-        "auc_a_per_fold": np.round(auc_a, 6).tolist(),
-        "auc_b_per_fold": np.round(auc_b, 6).tolist(),
-    }
-
-def make_paired_ttest_table(comparisons: list[tuple[str, str]], runs_root: Path = RUNS_ROOT) -> pd.DataFrame:
-    rows = []
-    for a, b in comparisons:
-        try:
-            rows.append(paired_fold_ttest_auc(a, b, runs_root=runs_root))
-        except Exception as e:
-            rows.append({"run_a": a, "run_b": b, "error": str(e)})
-    return pd.DataFrame(rows)
-
-def paired_bootstrap_auc_diff(
-    run_a_name: str,
-    run_b_name: str,
-    runs_root: Path = RUNS_ROOT,
-    n_boot: int = 1000,
-    seed: int = 42,
-    print_every: int | None = None,
-) -> dict:
-    run_a = load_oof_run(run_a_name, runs_root=runs_root)
-    run_b = load_oof_run(run_b_name, runs_root=runs_root)
-
-    y_a = run_a["y_true"]
-    y_b = run_b["y_true"]
-    if not np.array_equal(y_a, y_b):
-        raise ValueError(
-            f"OOF labels are not aligned for {run_a_name} and {run_b_name}; paired bootstrap is invalid."
-        )
-
-    y_true = y_a
-    prob_a = run_a["y_prob"]
-    prob_b = run_b["y_prob"]
-
-    observed_diff = roc_auc_score(y_true, prob_a) - roc_auc_score(y_true, prob_b)
-    rng = np.random.default_rng(seed)
-    n = len(y_true)
-    diffs = []
-
-    for i in range(n_boot):
-        idx = rng.integers(0, n, size=n)
-        if len(np.unique(y_true[idx])) < 2:
-            continue
-        diffs.append(roc_auc_score(y_true[idx], prob_a[idx]) - roc_auc_score(y_true[idx], prob_b[idx]))
-        if print_every is not None and (i + 1) % print_every == 0:
-            print(f"{run_a_name} vs {run_b_name}: {i + 1}/{n_boot}")
-
-    diffs = np.asarray(diffs)
-    ci_low, ci_high = np.percentile(diffs, [2.5, 97.5])
-    p_value = 2 * min(np.mean(diffs <= 0), np.mean(diffs >= 0))
-
-    return {
-        "run_a": run_a_name,
-        "run_b": run_b_name,
-        "observed_auc_diff": float(observed_diff),
-        "ci_low": float(ci_low),
-        "ci_high": float(ci_high),
-        "bootstrap_p_value": float(p_value),
-        "n_boot_valid": int(len(diffs)),
-    }
-
-def make_bootstrap_auc_table(
-    comparisons: list[tuple[str, str]],
-    runs_root: Path = RUNS_ROOT,
-    n_boot: int = 1000,
-    seed: int = 42,
-) -> pd.DataFrame:
-    rows = []
-    for a, b in comparisons:
-        try:
-            rows.append(paired_bootstrap_auc_diff(a, b, runs_root=runs_root, n_boot=n_boot, seed=seed))
-        except Exception as e:
-            rows.append({"run_a": a, "run_b": b, "error": str(e)})
-    return pd.DataFrame(rows)
-
-def save_priority_tables(
-    all_runs: pd.DataFrame,
-    integrity_audit: pd.DataFrame | None = None,
-    integrity_issues: pd.DataFrame | None = None,
-    baseline_summary: pd.DataFrame | None = None,
-    shuffled_sanity: pd.DataFrame | None = None,
-    architecture_comparison: pd.DataFrame | None = None,
-    architecture_differences: pd.DataFrame | None = None,
-    temporal_summary: pd.DataFrame | None = None,
-    temporal_delta: pd.DataFrame | None = None,
-    ablation_runs: pd.DataFrame | None = None,
-    ablation_summary: pd.DataFrame | None = None,
-    paired_ttests: pd.DataFrame | None = None,
-    bootstrap_results: pd.DataFrame | None = None,
-):
-    ensure_analysis_dirs()
-    tables = {
-        "all_runs_summary.csv": all_runs,
-        "run_integrity_audit.csv": integrity_audit,
-        "run_integrity_issues.csv": integrity_issues,
-        "baseline_oof_summary.csv": baseline_summary,
-        "shuffled_label_sanity_checks.csv": shuffled_sanity,
-        "architecture_comparison_0800.csv": architecture_comparison,
-        "architecture_differences_0800.csv": architecture_differences,
-        "temporal_window_summary.csv": temporal_summary,
-        "cnn_v2_temporal_delta.csv": temporal_delta,
-        "subject_ablation_runs.csv": ablation_runs,
-        "subject_ablation_summary.csv": ablation_summary,
-        "paired_fold_ttests.csv": paired_ttests,
-        "paired_bootstrap_auc_diffs.csv": bootstrap_results,
-    }
-
-    for filename, table in tables.items():
-        if table is not None:
-            table.to_csv(TABLES_DIR / filename, index=False)

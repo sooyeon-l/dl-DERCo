@@ -103,6 +103,7 @@ def main():
         out / "oof_predictions.npz",
         oof_probs=results["oof_probs"],
         oof_labels=results["oof_labels"],
+        oof_subjects=results["oof_subjects"],
     )
     with open(out / "run_summary.json", "w") as f:
         json.dump(results["run_summary"], f, indent=2)
