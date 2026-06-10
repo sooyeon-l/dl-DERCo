@@ -1,52 +1,96 @@
-# OS files
+# =========================
+# Python / cache
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# =========================
+# Environments
+# =========================
+.venv/
+venv/
+env/
+ENV/
+conda-meta/
+
+# =========================
+# OS / editor
+# =========================
 .DS_Store
 Thumbs.db
 desktop.ini
 *.ini
+.vscode/
+.idea/
 
-# Python
-__pycache__/
-*.py[cod]
-.ipynb_checkpoints/
+# =========================
+# Raw and processed EEG data
+# =========================
+inputs/
+data/
+processed_data_1000hz/
+processed_data_250hz/
 
-# Environment
-.env
-.env.*
-!.env.example
-
-# Data and model files
-*.npy
-*.pt
+# Common large data formats
 *.fif
-*.csv
-*.tsv
+*.edf
+*.bdf
+*.set
+*.vhdr
+*.vmrk
+*.eeg
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.mat
+*.parquet
+*.feather
+
+# =========================
+# Model checkpoints / weights
+# =========================
+checkpoints/
+*.pt
 *.pth
 *.ckpt
+*.onnx
 
-# Local folders — keep structure, ignore contents
-checkpoints/*
-!checkpoints/.gitkeep
-outputs/*
-!outputs/.gitkeep
-data/*
-!data/.gitkeep
-inputs/*
-!inputs/.gitkeep
-analysis/*
-!analysis/.gitkeep
-config_snapshots/*
-!config_snapshots/.gitkeep
-training_logs/*
-!training_logs/.gitkeep
-processed_data_250hz/*
-!processed_data_250hz/.gitkeep
-processed_data_1000hz/*
-!processed_data_1000hz/.gitkeep
-training_logs/*
-!training_logs/.gitkeep
-outputs/runs/*
-!outputs/runs/.gitkeep
+# =========================
+# Training logs
+# =========================
+training_logs/
+runs/
+wandb/
+mlruns/
+tensorboard/
+events.out.tfevents.*
 
-# Include later
-notebooks/*
-!notebooks/.gitkeep
+# =========================
+# Generated experiment outputs
+# =========================
+outputs/runs/
+
+# Keep final analysis outputs
+!outputs/analysis/
+!outputs/analysis/figures/
+!outputs/analysis/tables/
+!analysis/
+!analysis/figures/
+!analysis/tables/
+
+# =========================
+# Temporary files
+# =========================
+tmp/
+temp/
+*.log
+*.tmp

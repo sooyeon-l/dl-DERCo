@@ -1,0 +1,7 @@
+found,run_name,model,model_display,window,sfreq,shuffle_labels,oof_auc,oof_balanced_accuracy,oof_f1,threshold_used,n_oof_samples,run_dir
+True,cnn_0800_250hz_shuffle,cnn,CNN-v1,0800,250,True,0.5315441095218898,0.5258075098435734,0.5359255543639949,0.497,28265,/content/drive/MyDrive/Colab_Notebooks/DERCo/outputs/runs/baseline/cnn_0800_250hz_shuffle
+True,cnn_0800_250hz,cnn,CNN-v1,0800,250,False,0.5535412781671566,0.5387078369205616,0.5403671987877506,0.493,28265,/content/drive/MyDrive/Colab_Notebooks/DERCo/outputs/runs/baseline/cnn_0800_250hz
+True,cnn_v2_0800_250hz_shuffle,cnn_v2,CNN-v2,0800,250,True,0.5225888161598209,0.5186245800038795,0.5399054692775151,0.487,28265,/content/drive/MyDrive/Colab_Notebooks/DERCo/outputs/runs/baseline/cnn_v2_0800_250hz_shuffle
+True,cnn_v2_0800_250hz,cnn_v2,CNN-v2,0800,250,False,0.6174335383960733,0.5869896368514679,0.5908438123927283,0.47900000000000004,28265,/content/drive/MyDrive/Colab_Notebooks/DERCo/outputs/runs/baseline/cnn_v2_0800_250hz
+True,eegnet_0800_250hz_shuffle,eegnet,EEGNet,0800,250,True,0.5197671239927432,0.5153531766336024,0.5665742024965326,0.488,28265,/content/drive/MyDrive/Colab_Notebooks/DERCo/outputs/runs/baseline/eegnet_0800_250hz_shuffle
+True,eegnet_0800_250hz,eegnet,EEGNet,0800,250,False,0.6165762967591959,0.5858118554193255,0.5952479624257494,0.488,28265,/content/drive/MyDrive/Colab_Notebooks/DERCo/outputs/runs/baseline/eegnet_0800_250hz

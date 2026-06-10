@@ -4,7 +4,7 @@ from pathlib import Path
 import json
 import os
 from typing import Optional
-
+ 
 import mne as _mne
 import numpy as np
 import pandas as pd
@@ -26,19 +26,23 @@ MODEL_LABELS = {
 MODEL_ORDER = ["cnn", "cnn_v2", "eegnet"]
 
 
-def set_derco_root(root: str | Path) -> Path:
-    """
-    Update module-level paths after import.
+def infer_derco_root() -> Path:
+    return Path("/content/drive/MyDrive/Colab_Notebooks/DERCo")
 
-    Use this in notebooks if your data moved:
-        import results_analysis as ra
-        ra.set_derco_root("/workspace/data/DERCo")
-    """
+
+DERCO_ROOT = infer_derco_root()
+RUNS_ROOT = DERCO_ROOT / "outputs" / "runs"
+ANALYSIS_ROOT = DERCO_ROOT / "outputs" / "analysis"
+TABLES_DIR = ANALYSIS_ROOT / "tables"
+FIGURES_DIR = ANALYSIS_ROOT / "figures"
+
+
+def set_derco_root(root: str | Path) -> Path:
     global DERCO_ROOT, RUNS_ROOT, ANALYSIS_ROOT, TABLES_DIR, FIGURES_DIR
 
     DERCO_ROOT = Path(root)
     RUNS_ROOT = DERCO_ROOT / "outputs" / "runs"
-    ANALYSIS_ROOT = RUNS_ROOT / "analysis"
+    ANALYSIS_ROOT = DERCO_ROOT / "outputs" / "analysis"
     TABLES_DIR = ANALYSIS_ROOT / "tables"
     FIGURES_DIR = ANALYSIS_ROOT / "figures"
 
@@ -72,12 +76,6 @@ def _model_sort_key(model: str) -> int:
 
 
 def _normalize_subject_set(value) -> str:
-    """
-    Normalize selected_subjects for grouping.
-
-    selected_subjects may be a list from JSON, a stringified list, or missing.
-    We only need stable equality, not parsing for computation.
-    """
     if isinstance(value, (list, tuple, np.ndarray)):
         return "|".join(sorted(map(str, value)))
 
@@ -111,15 +109,6 @@ def compute_oof_metrics(oof_path: Path, threshold: float = 0.5) -> dict:
 
 
 def collect_run(run_dir: Path) -> dict | None:
-    """
-    Collect one completed run folder.
-
-    Expected files:
-        run_summary.json
-        config_snapshot.json
-        best_summary.csv
-        oof_predictions.npz
-    """
     run_summary_path = run_dir / "run_summary.json"
     config_snapshot_path = run_dir / "config_snapshot.json"
     oof_path = run_dir / "oof_predictions.npz"
@@ -214,7 +203,10 @@ def add_display_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def collect_all_runs(runs_root: Path = RUNS_ROOT) -> pd.DataFrame:
+def collect_all_runs(runs_root: Optional[Path] = None) -> pd.DataFrame:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     rows = []
 
     for run_summary_path in Path(runs_root).rglob("run_summary.json"):
@@ -229,6 +221,8 @@ def collect_all_runs(runs_root: Path = RUNS_ROOT) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     df = add_run_category(df)
     df = add_display_columns(df)
+
+
 
     return df
 
@@ -419,12 +413,6 @@ def make_architecture_comparison(
     baseline_summary: pd.DataFrame,
     run_names: Optional[list[str]] = None,
 ) -> pd.DataFrame:
-    """
-    Compare full-window architecture baselines.
-
-    Missing runs are preserved with found=False. This is intentional because CNN-v2
-    baseline/shuffle may not exist yet even if CNN-v2 subject_ablation exists.
-    """
     if run_names is None:
         run_names = [
             "cnn_0800_250hz_shuffle",
@@ -550,7 +538,7 @@ def plot_architecture_comparison(
     ax.set_ylim(0.50, max(plot_df["oof_auc"]) + 0.04)
 
     for i, val in enumerate(plot_df["oof_auc"].values):
-        ax.text(i, val + 0.003, f"{val:.3f}", ha="center", va="bottom", fontsize=8)
+        ax.text(i, val + 0.003, f"{val:.5f}", ha="center", va="bottom", fontsize=8)
 
     fig.tight_layout()
 
@@ -562,12 +550,6 @@ def plot_architecture_comparison(
 
 
 def make_temporal_window_summary(baseline_summary: pd.DataFrame) -> pd.DataFrame:
-    """
-    Baseline-only temporal-window summary.
-
-    If CNN-v2 baseline windows are missing, this returns only CNN-v1 rows.
-    That is correct: CNN-v2 subject_ablation runs are not temporal-window baselines.
-    """
     if baseline_summary.empty:
         return baseline_summary
 
@@ -662,6 +644,11 @@ def plot_temporal_window_auc(
 
     window_order = ["0–200 ms", "300–500 ms", "500–800 ms", "0–800 ms"]
     models = [m for m in MODEL_ORDER if m in temporal_summary["model"].unique()]
+    model_colors = {
+        "cnn": "#94a3b8",      # CNN-v1
+        "cnn_v2": "#f97316",   # CNN-v2, optional orange
+        "eegnet": "#10b981",   # EEGNet, optional green
+    }
 
     pivot = (
         temporal_summary
@@ -669,7 +656,7 @@ def plot_temporal_window_auc(
         .reindex(window_order)
     )
 
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig, ax = plt.subplots(figsize=(7, 4))
     x = np.arange(len(window_order))
     width = 0.8 / max(len(models), 1)
 
@@ -681,7 +668,13 @@ def plot_temporal_window_auc(
         vals = pivot[model].values
         label = MODEL_LABELS.get(model, model)
 
-        ax.bar(x + offset, vals, width, label=label)
+        ax.bar(
+            x + offset,
+            vals,
+            width,
+            label=label,
+            color=model_colors.get(model, None),
+        )
 
         for j, val in enumerate(vals):
             if pd.notna(val):
@@ -827,9 +820,6 @@ def make_subject_ablation_summary(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
-    # If a condition only has one unique subject set, error bars represent no
-    # random-subset variability. This especially fixes n=18 for CNN-v1/EEGNet,
-    # where repeated seeds select the same full train/val subject pool.
     no_subset_variance = summary["n_unique_subject_sets"] <= 1
 
     summary.loc[
@@ -886,34 +876,92 @@ def plot_subject_ablation_auc(
     summary: pd.DataFrame,
     save_path: Optional[Path] = None,
     title: str = "Subject-count ablation: model sample efficiency",
+    shuffled_auc: float | None = 0.5315441095218898,
 ):
     if summary.empty:
         raise ValueError("Subject ablation summary is empty.")
 
-    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    model_colors = {
+        "cnn": "#94a3b8",      # CNN-v1
+        "cnn_v2": "#f97316",   # CNN-v2
+        "eegnet": "#10b981",   # EEGNet
+    }
 
-    for model, src in summary.groupby("model", sort=False):
-        src = src.sort_values("subject_count")
+    fig, ax = plt.subplots(figsize=(7, 5.5))
 
+    for model in MODEL_ORDER:
+        if model not in summary["model"].values:
+            continue
+
+        src = summary[summary["model"] == model].sort_values("subject_count")
+
+        ax.plot(
+            src["subject_count"],
+            src["mean_auc"],
+            marker="o",
+            markersize=6,
+            linewidth=2.8,
+            color=model_colors.get(model, None),
+            label=MODEL_LABELS.get(model, model),
+            alpha=0.95,
+        )
+
+        # Lighter SEM error bars, except where SEM is NaN at full-pool n=18.
         ax.errorbar(
             src["subject_count"],
             src["mean_auc"],
             yerr=src["sem_auc"],
-            marker="o",
+            fmt="none",
+            ecolor=model_colors.get(model, None),
+            elinewidth=1.2,
             capsize=3,
-            label=MODEL_LABELS.get(model, model),
+            alpha=0.45,
         )
 
-    ax.set_xlabel("Number of subjects included in CV pool")
-    ax.set_ylabel("Out-of-fold ROC AUC")
-    ax.set_title(title)
-    ax.legend()
+    if shuffled_auc is not None:
+        x_min = summary["subject_count"].min()
+        x_max = summary["subject_count"].max()
+
+        ax.hlines(
+            y=shuffled_auc,
+            xmin=x_min,
+            xmax=x_max,
+            colors="#cbd5e1",
+            linewidth=2.4,
+            alpha=0.95,
+            label="Shuffled-label baseline",
+        )
+
+    ax.set_xlabel("Number of subjects included in CV pool", fontsize=11)
+    ax.set_ylabel("Out-of-fold ROC AUC", fontsize=11)
+    ax.set_title(title, fontsize=13, pad=12)
+
+    ax.set_xticks(sorted(summary["subject_count"].unique()))
+    ax.set_ylim(0.52, 0.64)
+
+    ax.grid(axis="y", alpha=0.22, linewidth=1)
+    ax.grid(axis="x", visible=False)
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax.tick_params(axis="both", labelsize=10)
+
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.28),
+        ncol=4,
+        frameon=False,
+        fontsize=9,
+        handlelength=1.5,
+        columnspacing=1.4,
+    )
 
     fig.tight_layout()
 
     if save_path is not None:
         ensure_analysis_dirs()
-        fig.savefig(save_path, dpi=300)
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
 
     return fig, ax
 
@@ -921,37 +969,79 @@ def plot_subject_ablation_auc(
 def plot_subject_ablation_bal_acc(
     summary: pd.DataFrame,
     save_path: Optional[Path] = None,
+    title: str = "Subject-count ablation: balanced accuracy",
 ):
     if summary.empty:
         raise ValueError("Subject ablation summary is empty.")
 
-    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    model_colors = {
+        "cnn": "#94a3b8",      # CNN-v1
+        "cnn_v2": "#f97316",   # CNN-v2
+        "eegnet": "#10b981",   # EEGNet
+    }
 
-    for model, src in summary.groupby("model", sort=False):
-        src = src.sort_values("subject_count")
+    fig, ax = plt.subplots(figsize=(8, 4.8))
+
+    for model in MODEL_ORDER:
+        if model not in summary["model"].values:
+            continue
+
+        src = summary[summary["model"] == model].sort_values("subject_count")
+
+        ax.plot(
+            src["subject_count"],
+            src["mean_bal_acc"],
+            marker="o",
+            markersize=6,
+            linewidth=2.8,
+            color=model_colors.get(model, None),
+            label=MODEL_LABELS.get(model, model),
+            alpha=0.95,
+        )
 
         ax.errorbar(
             src["subject_count"],
             src["mean_bal_acc"],
             yerr=src["sem_bal_acc"],
-            marker="o",
+            fmt="none",
+            ecolor=model_colors.get(model, None),
+            elinewidth=1.2,
             capsize=3,
-            label=MODEL_LABELS.get(model, model),
+            alpha=0.45,
         )
 
-    ax.set_xlabel("Number of subjects included in CV pool")
-    ax.set_ylabel("Out-of-fold balanced accuracy")
-    ax.set_title("Subject-count ablation: balanced accuracy")
-    ax.legend()
+    ax.set_xlabel("Number of subjects included in CV pool", fontsize=11)
+    ax.set_ylabel("Out-of-fold balanced accuracy", fontsize=11)
+    ax.set_title(title, fontsize=13, pad=12)
+
+    ax.set_xticks(sorted(summary["subject_count"].unique()))
+    ax.set_ylim(0.52, 0.60)
+
+    ax.grid(axis="y", alpha=0.22, linewidth=1)
+    ax.grid(axis="x", visible=False)
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax.tick_params(axis="both", labelsize=10)
+
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.28),
+        ncol=3,
+        frameon=False,
+        fontsize=9,
+        handlelength=1.5,
+        columnspacing=1.4,
+    )
 
     fig.tight_layout()
 
     if save_path is not None:
         ensure_analysis_dirs()
-        fig.savefig(save_path, dpi=300)
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
 
     return fig, ax
-
 
 def plot_subject_ablation_auc_above_shuffle(
     adjusted_summary: pd.DataFrame,
@@ -1075,8 +1165,8 @@ def make_paired_ttest_results(
         valid_n = DEFAULT_TTEST_N
 
     pairs = [
-        ("cnn", "eegnet"),
-        ("cnn", "cnn_v2"),
+        ("eegnet", "cnn"),
+        ("cnn_v2", "cnn"),
         ("eegnet", "cnn_v2"),
     ]
 
@@ -1237,15 +1327,7 @@ def plot_ttest_significance_grid(
     return fig, ax
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 11. OOF predicted probability distributions
-# ─────────────────────────────────────────────────────────────────────────────
-
 def load_oof_predictions(run_dir: str | Path) -> dict | None:
-    """
-    Load oof_probs and oof_labels from a run directory.
-    Returns None if the npz file is missing.
-    """
     path = Path(run_dir) / "oof_predictions.npz"
     if not path.exists():
         return None
@@ -1261,22 +1343,13 @@ def make_oof_prob_distributions(
     baseline_summary: pd.DataFrame,
     target_runs: list[str] | None = None,
 ) -> dict[str, dict]:
-    """
-    Collect OOF probability distributions for baseline runs.
 
-    Returns a dict keyed by run_name, each with:
-        probs_high: probabilities for high-cloze trials (y=1)
-        probs_low:  probabilities for low-cloze trials  (y=0)
-        model:      model name
-        model_display: display label
-    """
     if baseline_summary.empty:
         return {}
 
     if target_runs is not None:
         rows = baseline_summary[baseline_summary["run_name"].isin(target_runs)]
     else:
-        # Default: real-label baselines only, 0–800 ms, 250 Hz
         rows = baseline_summary[
             (baseline_summary["shuffle_labels"] == False)
             & (baseline_summary["window"] == "0800")
@@ -1307,12 +1380,7 @@ def plot_oof_probability_distributions(
     distributions: dict,
     save_path: Path | None = None,
 ) -> tuple:
-    """
-    KDE plot of predicted probabilities split by true label.
 
-    One subplot per model. Blue = low-cloze (y=0), orange = high-cloze (y=1).
-    Separation between the two distributions is the signal the model found.
-    """
     from scipy.stats import gaussian_kde
 
     if not distributions:
@@ -1335,7 +1403,6 @@ def plot_oof_probability_distributions(
             ax.set_visible(False)
             continue
 
-        # Aggregate across runs with the same model
         probs_low  = np.concatenate([e["probs_low"]  for e in entries])
         probs_high = np.concatenate([e["probs_high"] for e in entries])
 
@@ -1365,11 +1432,8 @@ def plot_oof_probability_distributions(
 
     return fig, axes
 
-# 12. Gradient saliency maps
-# ─────────────────────────────────────────────────────────────────────────────
+# Gradient saliency maps
 
-# Standard 32-channel 10-20 layout matching the DERCo dataset.
-# Override by passing channel_names explicitly to any plot function.
 DERCO_CHANNEL_NAMES = [
     "Fp1", "Fp2", "F7", "F3", "Fz", "F4", "F8",
     "FC5", "FC1", "FC2", "FC6",
@@ -1383,11 +1447,6 @@ DERCO_CHANNEL_NAMES = [
 def _load_fold_checkpoint(ckpt_path, device):
     import torch
 
-    # These are our own training checkpoints and include metadata such as
-    # zscore_mean, zscore_std, train_subjects, and val_subjects.
-    # PyTorch 2.6 defaults torch.load(..., weights_only=True), which blocks
-    # NumPy metadata. We explicitly set weights_only=False for trusted local
-    # checkpoints.
     ckpt = torch.load(
         ckpt_path,
         map_location=device,
@@ -1754,8 +1813,11 @@ def _model_display_name(model: str) -> str:
     }
     return mapping.get(str(model), str(model))
 
-def find_run_dir(run_name: str, runs_root: Path = RUNS_ROOT) -> Path:
+def find_run_dir(run_name: str, runs_root: Optional[Path] = None) -> Path:
     """Find a completed run folder by run_summary.json run_name."""
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     matches = []
     for summary_path in runs_root.rglob("run_summary.json"):
         run_dir = summary_path.parent
@@ -1777,7 +1839,10 @@ def find_run_dir(run_name: str, runs_root: Path = RUNS_ROOT) -> Path:
 
     return matches[0]
 
-def load_oof_run(run_name: str, runs_root: Path = RUNS_ROOT) -> dict:
+def load_oof_run(run_name: str, runs_root: Optional[Path] = None) -> dict:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     run_dir = find_run_dir(run_name, runs_root=runs_root)
     summary = load_json(run_dir / "run_summary.json")
 
@@ -1801,7 +1866,10 @@ def load_oof_run(run_name: str, runs_root: Path = RUNS_ROOT) -> dict:
         "y_prob": oof["oof_probs"].reshape(-1),
     }
 
-def summarize_run(run_name: str, runs_root: Path = RUNS_ROOT) -> dict:
+def summarize_run(run_name: str, runs_root: Optional[Path] = None) -> dict:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     run = load_oof_run(run_name, runs_root=runs_root)
     threshold = _safe_float(run["summary"].get("global_threshold", 0.5), default=0.5)
     metrics = compute_metrics(run["y_true"], run["y_prob"], threshold)
@@ -1828,7 +1896,10 @@ def compute_metrics(y_true, y_prob, threshold: float) -> dict:
         "n_samples": len(y_true),
     }
 
-def load_epoch_log(run_name: str, runs_root: Path = RUNS_ROOT) -> pd.DataFrame:
+def load_epoch_log(run_name: str, runs_root: Optional[Path] = None) -> pd.DataFrame:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     run_dir = find_run_dir(run_name, runs_root=runs_root)
     path = run_dir / "epoch_log.csv"
     if not path.exists():
@@ -1877,7 +1948,10 @@ def plot_training_curves(
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
     return fig, axes
 
-def plot_training_curves_for_runs(run_names: list[str], runs_root: Path = RUNS_ROOT, save: bool = True):
+def plot_training_curves_for_runs(run_names: list[str], runs_root: Optional[Path] = None, save: bool = True):
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     figs = {}
     for run_name in run_names:
         try:
@@ -1908,8 +1982,11 @@ def plot_probability_distributions(
     title: str = "OOF predicted probability distributions",
     save_path: Path | None = None,
     bins: int = 40,
-    runs_root: Path = RUNS_ROOT,
+    runs_root: Optional[Path] = None,
 ):
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     if labels is None:
         labels = run_names
     if len(labels) != len(run_names):
@@ -1932,7 +2009,10 @@ def plot_probability_distributions(
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
     return fig, axes
 
-def load_fold_aucs(run_name: str, runs_root: Path = RUNS_ROOT) -> np.ndarray:
+def load_fold_aucs(run_name: str, runs_root: Optional[Path] = None) -> np.ndarray:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     run_dir = find_run_dir(run_name, runs_root=runs_root)
     path = run_dir / "best_summary.csv"
     if not path.exists():
@@ -1940,7 +2020,10 @@ def load_fold_aucs(run_name: str, runs_root: Path = RUNS_ROOT) -> np.ndarray:
     df = pd.read_csv(path)
     return df.sort_values("fold")["best_val_roc_auc"].values
 
-def paired_fold_ttest_auc(run_a_name: str, run_b_name: str, runs_root: Path = RUNS_ROOT) -> dict:
+def paired_fold_ttest_auc(run_a_name: str, run_b_name: str, runs_root: Optional[Path] = None) -> dict:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     auc_a = load_fold_aucs(run_a_name, runs_root=runs_root)
     auc_b = load_fold_aucs(run_b_name, runs_root=runs_root)
 
@@ -1965,7 +2048,10 @@ def paired_fold_ttest_auc(run_a_name: str, run_b_name: str, runs_root: Path = RU
         "auc_b_per_fold": np.round(auc_b, 6).tolist(),
     }
 
-def make_paired_ttest_table(comparisons: list[tuple[str, str]], runs_root: Path = RUNS_ROOT) -> pd.DataFrame:
+def make_paired_ttest_table(comparisons: list[tuple[str, str]], runs_root: Optional[Path] = None) -> pd.DataFrame:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     rows = []
     for a, b in comparisons:
         try:
@@ -1977,11 +2063,14 @@ def make_paired_ttest_table(comparisons: list[tuple[str, str]], runs_root: Path 
 def paired_bootstrap_auc_diff(
     run_a_name: str,
     run_b_name: str,
-    runs_root: Path = RUNS_ROOT,
+    runs_root: Optional[Path] = None,
     n_boot: int = 1000,
     seed: int = 42,
     print_every: int | None = None,
 ) -> dict:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     run_a = load_oof_run(run_a_name, runs_root=runs_root)
     run_b = load_oof_run(run_b_name, runs_root=runs_root)
 
@@ -2025,10 +2114,13 @@ def paired_bootstrap_auc_diff(
 
 def make_bootstrap_auc_table(
     comparisons: list[tuple[str, str]],
-    runs_root: Path = RUNS_ROOT,
+    runs_root: Optional[Path] = None,
     n_boot: int = 1000,
     seed: int = 42,
 ) -> pd.DataFrame:
+    if runs_root is None:
+        runs_root = RUNS_ROOT
+
     rows = []
     for a, b in comparisons:
         try:
@@ -2072,3 +2164,346 @@ def save_priority_tables(
     for filename, table in tables.items():
         if table is not None:
             table.to_csv(TABLES_DIR / filename, index=False)
+
+
+
+ 
+ 
+def plot_test_evaluation(
+    test_results: pd.DataFrame,
+    oof_baseline_summary: pd.DataFrame | None = None,
+    save_path: Path | None = None,
+) -> tuple:
+
+    if test_results.empty:
+        raise ValueError("Test evaluation results are empty.")
+ 
+    models_present = [
+        m for m in MODEL_ORDER if m in test_results["model"].values
+    ]
+    plot_df = test_results[
+        test_results["model"].isin(models_present)
+    ].copy()
+    plot_df["model_order"] = plot_df["model"].map(_model_sort_key)
+    plot_df = plot_df.sort_values("model_order")
+ 
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    x = np.arange(len(plot_df))
+ 
+    bars = ax.bar(
+        x,
+        plot_df["test_roc_auc"].values,
+        color=["steelblue", "darkorange", "seagreen"][: len(plot_df)],
+        alpha=0.85,
+        width=0.5,
+    )
+ 
+    if oof_baseline_summary is not None:
+        oof = oof_baseline_summary[
+            (oof_baseline_summary["shuffle_labels"] == False)
+            & (oof_baseline_summary["window"] == plot_df["window"].iloc[0])
+            & (oof_baseline_summary["sfreq"] == plot_df["sfreq"].iloc[0])
+        ].set_index("model")
+ 
+        for i, row in enumerate(plot_df.itertuples()):
+            if row.model in oof.index:
+                oof_auc = oof.loc[row.model, "oof_auc"]
+                ax.plot(
+                    i, oof_auc,
+                    marker="D",
+                    color="black",
+                    markersize=7,
+                    zorder=5,
+                    label="OOF AUC (CV)" if i == 0 else "_nolegend_",
+                )
+ 
+    for bar, val in zip(bars, plot_df["test_roc_auc"].values):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            val + 0.003,
+            f"{val:.3f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+ 
+    ax.set_xticks(x)
+    ax.set_xticklabels(plot_df["model_display"].values)
+    ax.set_ylabel("Test ROC AUC")
+    ax.set_title("Out-of-sample test evaluation")
+    ax.set_ylim(0.50, max(plot_df["test_roc_auc"].max(), 0.65) + 0.04)
+ 
+    if oof_baseline_summary is not None:
+        ax.legend(fontsize=9)
+ 
+    fig.tight_layout()
+ 
+    if save_path is not None:
+        ensure_analysis_dirs()
+        fig.savefig(save_path, dpi=300)
+ 
+    return fig, ax
+
+
+def plot_test_evaluation_fixed(
+    test_results: pd.DataFrame,
+    oof_baseline_summary: pd.DataFrame | None = None,
+    save_path: Path | None = None,
+    metric: str = "test_roc_auc",
+    oof_metric: str = "oof_auc",
+    title: str = "Out-of-sample test evaluation",
+    ylim_floor: float = 0.50,
+) -> tuple:
+    if test_results.empty:
+        raise ValueError("Test evaluation results are empty.")
+
+    if metric not in test_results.columns:
+        raise ValueError(f"{metric!r} not found in test_results columns.")
+
+    plot_df = test_results.copy()
+
+    if "model_display" not in plot_df.columns:
+        plot_df["model_display"] = plot_df["model"].map(MODEL_LABELS).fillna(plot_df["model"])
+
+    plot_df["model_order"] = plot_df["model"].map(_model_sort_key)
+    plot_df = plot_df.sort_values("model_order").reset_index(drop=True)
+
+    plot_df["window_key"] = plot_df["window"].astype(str).str.zfill(4)
+    plot_window = plot_df["window_key"].iloc[0]
+    plot_sfreq = int(plot_df["sfreq"].iloc[0])
+
+    plot_df["oof_auc_reference"] = np.nan
+    plot_df["test_minus_oof"] = np.nan
+
+    if oof_baseline_summary is not None and not oof_baseline_summary.empty:
+        oof = oof_baseline_summary.copy()
+        oof = oof[
+            (oof["shuffle_labels"] == False)
+            & (oof["sfreq"].astype(int) == plot_sfreq)
+        ].copy()
+
+        oof["window_key"] = oof["window"].astype(str).str.zfill(4)
+        oof = oof[oof["window_key"] == plot_window]
+
+        if oof_metric not in oof.columns:
+            raise ValueError(f"{oof_metric!r} not found in oof_baseline_summary columns.")
+
+        oof_map = oof.set_index("model")[oof_metric].to_dict()
+        plot_df["oof_auc_reference"] = plot_df["model"].map(oof_map)
+        plot_df["test_minus_oof"] = plot_df[metric] - plot_df["oof_auc_reference"]
+
+    # Plot.
+    fig, ax = plt.subplots(figsize=(7.5, 4.8))
+    x = np.arange(len(plot_df))
+
+    bars = ax.bar(
+        x,
+        plot_df[metric].values,
+        width=0.55,
+        alpha=0.85,
+        label="Held-out test AUC",
+    )
+
+    for i, (bar, val) in enumerate(zip(bars, plot_df[metric].values)):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            val - 0.010,          
+            f"{val:.3f}",
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="black",
+        )
+
+    has_oof = plot_df["oof_auc_reference"].notna().any()
+
+    if has_oof:
+        for i, row in plot_df.iterrows():
+            oof_val = row["oof_auc_reference"]
+
+            if pd.isna(oof_val):
+                continue
+
+            ax.plot(
+                i,
+                oof_val,
+                marker="D",
+                color="black",
+                markersize=7,
+                linestyle="None",
+                zorder=5,
+                label="OOF AUC (CV)" if i == 0 else "_nolegend_",
+            )
+
+            gap = row["test_minus_oof"]
+            gap_text = f"Δ={gap:+.3f}"
+
+            y_gap = max(row[metric], oof_val) + 0.012
+            ax.text(
+                i,
+                y_gap,
+                gap_text,
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color="black",
+            )
+
+    ax.axhline(
+        0.50,
+        linestyle="--",
+        linewidth=1,
+        color="gray",
+        alpha=0.8,
+        label="Chance AUC = 0.50",
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(plot_df["model_display"].values)
+    ax.set_ylabel("ROC AUC")
+    ax.set_title(title)
+
+    y_values = [plot_df[metric].max()]
+    if has_oof:
+        y_values.append(plot_df["oof_auc_reference"].max())
+
+    y_max = np.nanmax(y_values)
+    ax.set_ylim(ylim_floor, min(1.0, y_max + 0.07))
+
+    ax.legend(fontsize=9, loc="best")
+    fig.tight_layout()
+
+    if save_path is not None:
+        ensure_analysis_dirs()
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig, ax
+
+
+def plot_test_vs_oof_auc_grouped(
+    test_results: pd.DataFrame,
+    baseline_summary: pd.DataFrame,
+    save_path: Path | None = None,
+    title: str = "Held-out test AUC vs. cross-validation OOF AUC",
+) -> tuple:
+    if test_results.empty:
+        raise ValueError("test_results is empty.")
+
+    required_test_cols = {"model", "window", "sfreq", "test_roc_auc"}
+    missing_test = required_test_cols - set(test_results.columns)
+    if missing_test:
+        raise ValueError(f"test_results missing columns: {missing_test}")
+
+    required_oof_cols = {"model", "window", "sfreq", "shuffle_labels", "oof_auc"}
+    missing_oof = required_oof_cols - set(baseline_summary.columns)
+    if missing_oof:
+        raise ValueError(f"baseline_summary missing columns: {missing_oof}")
+
+    plot_df = test_results.copy()
+
+    if "model_display" not in plot_df.columns:
+        plot_df["model_display"] = plot_df["model"].map(MODEL_LABELS).fillna(plot_df["model"])
+
+    plot_df["model_order"] = plot_df["model"].map(_model_sort_key)
+    plot_df["window_key"] = plot_df["window"].astype(str).str.zfill(4)
+
+    plot_window = plot_df["window_key"].iloc[0]
+    plot_sfreq = int(plot_df["sfreq"].iloc[0])
+
+    oof = baseline_summary.copy()
+    oof = oof[
+        (oof["shuffle_labels"] == False)
+        & (oof["sfreq"].astype(int) == plot_sfreq)
+    ].copy()
+    oof["window_key"] = oof["window"].astype(str).str.zfill(4)
+    oof = oof[oof["window_key"] == plot_window]
+
+    oof_map = oof.set_index("model")["oof_auc"].to_dict()
+    plot_df["oof_auc_cv"] = plot_df["model"].map(oof_map)
+
+    plot_df = (
+        plot_df
+        .dropna(subset=["test_roc_auc", "oof_auc_cv"])
+        .sort_values("model_order")
+        .reset_index(drop=True)
+    )
+
+    if plot_df.empty:
+        raise ValueError("No matching test/OFF baseline rows after merging.")
+
+    x = np.arange(len(plot_df))
+    width = 0.34
+
+    fig, ax = plt.subplots(figsize=(7, 4.8))
+
+    test_color = "#0e99b3"   # teal-blue
+    oof_color = "#cbd5e1"    # light slate
+
+    bars_test = ax.bar(
+        x - width / 2,
+        plot_df["test_roc_auc"],
+        width,
+        label="Held-out test AUC",
+        color=test_color,
+        alpha=0.95,
+    )
+
+    bars_oof = ax.bar(
+        x + width / 2,
+        plot_df["oof_auc_cv"],
+        width,
+        label="Cross-validation OOF AUC",
+        color=oof_color,
+        alpha=0.95,
+    )
+
+    for bars in [bars_test, bars_oof]:
+        for bar in bars:
+            val = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                val + 0.004,
+                f"{val:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
+
+    ax.axhline(
+        0.50,
+        linestyle="--",
+        linewidth=1,
+        color="gray",
+        alpha=0.7,
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(plot_df["model_display"])
+    ax.set_xlabel("Model")
+    ax.set_ylabel("ROC AUC")
+    ax.set_title(title, pad=12)
+
+    y_max = max(plot_df["test_roc_auc"].max(), plot_df["oof_auc_cv"].max())
+    ax.set_ylim(0.50, min(1.0, y_max + 0.04))
+
+    ax.grid(axis="y", alpha=0.22, linewidth=1)
+    ax.grid(axis="x", visible=False)
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    ax.legend(
+        loc="lower center",
+        bbox_to_anchor=(0.5, -0.28),
+        ncol=2,
+        frameon=False,
+        fontsize=9,
+    )
+
+    fig.tight_layout()
+
+    if save_path is not None:
+        ensure_analysis_dirs()
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig, ax

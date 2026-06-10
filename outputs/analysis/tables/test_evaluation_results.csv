@@ -1,0 +1,4 @@
+run_name,model,model_display,window,sfreq,n_test_samples,n_folds,val_threshold,test_roc_auc,test_pr_auc,test_bal_acc_05,test_bal_acc_val_threshold
+cnn_0800_250hz,cnn,CNN-v1,0800,250,3250,5,0.493,0.5421,0.5346,0.5247,0.525
+cnn_v2_0800_250hz,cnn_v2,CNN-v2,0800,250,3250,5,0.479,0.6436,0.6208,0.5977,0.598
+eegnet_0800_250hz,eegnet,EEGNet,0800,250,3250,5,0.488,0.6404,0.6163,0.6057,0.609
